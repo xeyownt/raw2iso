@@ -34,42 +34,43 @@ limitations under the License.
 #	define SET_BINARY_MODE(fd) assert(1)
 #endif
 
-#define RAW2ISO_VERSION "0.0.2"
+#define RAW2ISO_VERSION "0.0.2~xeyownt-1"
 
 static void usage(char const * argv0)
 {
 	fprintf(stderr,
 "Convert raw optical disk images to iso files.\n"
 "\n"
-"Usage: %s <track-mode> [<sub-channel-mode>] < INPUT.BIN > OUTPUT.ISO\n"
+"Usage: %s <track-mode> [<sub-channel-mode> [<output-mode>]] < INPUT.BIN > OUTPUT.ISO\n"
 "\n"
 "<track-mode>: MODE1_RAW | MODE1 | MODE2_RAW | MODE2_FORM1 | "
 	"MODE2_FORM2 | MODE2_FORM_MIX\n"
 "<sub-channel-mode>: RW | RW_RAW\n"
+"<output-mode>: ISO (default) | RAW | SUB\n"
 "\n"
 "(See cdrdao(1) -> TOC FILES -> Track Specification -> TRACK.)\n"
 "\n"
 "Note: Error correction/detection data is not checked (try\n"
 "https://github.com/claunia/edccchk) and errors are not corrected.\n"
 "\n"
-"raw2iso %s - https://github.com/not-a-user/raw2iso\n",
+"raw2iso %s - https://github.com/not-a-user/raw2iso, https://github.com/xeyownt/raw2iso\n",
 	argv0, RAW2ISO_VERSION);
 }
 
 // https://en.wikipedia.org/wiki/CD-ROM#CD-ROM_format
 // https://en.wikipedia.org/wiki/CD-ROM#CD-ROM_XA_extension
 
-#define SECTOR_SIZE 2048
-
 // default: MODE1_RAW
 size_t sector_raw_size = 2352;
 size_t sector_offset = 16;
+size_t sector_size = 2048;
+int    has_subchannel = 0;
 
 static void parse_args(int const argc, char const * argv[])
 {
 	assert(argc > 0);
 
-	if (argc == 1 || argc > 3) {
+	if (argc == 1 || argc > 4) {
 		usage(argv[0]);
 		exit(EXIT_FAILURE);
 	} else {
@@ -94,17 +95,40 @@ static void parse_args(int const argc, char const * argv[])
 			usage(argv[0]);
 			exit(EXIT_FAILURE);
 		}
-		if (argc == 3) {
+		if (argc >= 3) {
 			char const * const sub_channel_mode = argv[2];
 			if (
 				! strcmp("RW", sub_channel_mode) ||
 				! strcmp("RW_RAW", sub_channel_mode)
 			) {
 				sector_raw_size += 96;
+				has_subchannel = 1;
 			} else {
 				usage(argv[0]);
 				exit(EXIT_FAILURE);
 			}
+		}
+		if (argc == 4) {
+			char const * const output_mode = argv[3];
+			if (! strcmp("ISO", output_mode)) {
+				; // default
+			} else if (
+				! strcmp("RAW", output_mode) &&
+				has_subchannel
+			) {
+				sector_size = sector_raw_size - 96;
+				sector_offset = 0;
+			} else if (
+				! strcmp("SUB", output_mode) &&
+				has_subchannel
+			) {
+				sector_size = 96;
+				sector_offset = sector_raw_size - 96;
+			} else {
+				usage(argv[0]);
+				exit(EXIT_FAILURE);
+			}
+
 		}
 	}
 }
@@ -112,7 +136,7 @@ static void parse_args(int const argc, char const * argv[])
 int main(int const argc, char const * argv[])
 {
 	parse_args(argc, argv);
-	assert(sector_raw_size >= SECTOR_SIZE + sector_offset);
+	assert(sector_raw_size >= sector_size + sector_offset);
 
 	SET_BINARY_MODE(_fileno(stdin));
 	SET_BINARY_MODE(_fileno(stdout));
@@ -127,8 +151,8 @@ int main(int const argc, char const * argv[])
 			assert(feof(stdin));
 			exit(EXIT_SUCCESS);
 		} else if (got == sector_raw_size) {
-			assert(fwrite(& sector[sector_offset], 1, SECTOR_SIZE,
-				stdout) == SECTOR_SIZE);
+			assert(fwrite(& sector[sector_offset], 1, sector_size,
+				stdout) == sector_size);
 			assert(! ferror(stdout));
 		} else {
 			fprintf(stderr, "input is corrupted\n");
